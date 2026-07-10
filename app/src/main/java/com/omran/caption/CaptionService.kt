@@ -41,6 +41,7 @@ class CaptionService : Service() {
 
     private val sampleRate = 16000
     private lateinit var guestId: String
+    private var silentStreak = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
@@ -165,12 +166,20 @@ class CaptionService : Service() {
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
+                    translated.isNotBlank() -> {
+                        silentStreak = 0
+                        OverlayService.updateText(applicationContext, translated)
+                    }
                     serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
                     else -> {
                         // Empty original/translated with no error means silence in this
-                        // chunk (nothing spoken/playing) — clear the caption immediately.
-                        OverlayService.updateText(applicationContext, "")
+                        // chunk. A single silent chunk can just be a natural pause between
+                        // words/sentences, so don't clear immediately — only clear after
+                        // 2 consecutive silent chunks (~9s of real silence).
+                        silentStreak++
+                        if (silentStreak >= 2) {
+                            OverlayService.updateText(applicationContext, "")
+                        }
                     }
                 }
             }
