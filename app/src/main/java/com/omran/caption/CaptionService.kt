@@ -41,7 +41,6 @@ class CaptionService : Service() {
 
     private val sampleRate = 16000
     private lateinit var guestId: String
-    private var silentStreak = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
@@ -82,9 +81,9 @@ class CaptionService : Service() {
             .build()
     }
 
-    private var projectionStopped = false
+    private fun startCapture(speaking: String, translate: String) {
+        val projection = mediaProjection ?: return
 
-    private fun buildAudioRecord(projection: MediaProjection): AudioRecord? {
         val config = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
@@ -102,110 +101,32 @@ class CaptionService : Service() {
             .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
             .build()
 
-        return try {
-            val rec = AudioRecord.Builder()
+        try {
+            audioRecord = AudioRecord.Builder()
                 .setAudioFormat(format)
                 .setBufferSizeInBytes(bufferSize)
                 .setAudioPlaybackCaptureConfig(config)
                 .build()
-            if (rec.state != AudioRecord.STATE_INITIALIZED) {
-                rec.release()
-                null
-            } else {
-                rec
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun startCapture(speaking: String, translate: String) {
-        val projection = mediaProjection ?: return
-
-        // Detect when the system itself force-stops the capture session
-        // (e.g. Huawei/EMUI killing it after some time). We can't silently
-        // resume in that case (Android requires a fresh user consent), so we
-        // just tell the user clearly instead of leaving a broken silent state.
-        projection.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                projectionStopped = true
-                OverlayService.updateText(
-                    applicationContext,
-                    "⚠ انقطع الاتصال بالنظام، افتح التطبيق وابدأ من جديد / Connection lost, please reopen the app"
-                )
-            }
-        }, null)
-
-        audioRecord = buildAudioRecord(projection)
-        if (audioRecord == null) {
+        } catch (e: SecurityException) {
             OverlayService.updateText(this, "خطأ بالإذن / Permission error")
             return
         }
+
         audioRecord?.startRecording()
 
         job = CoroutineScope(Dispatchers.IO).launch {
             val chunkMillis = 4500L
             val bytesPerChunk = (sampleRate * 2 * chunkMillis / 1000).toInt()
             val readBuf = ByteArray(4096)
-            var consecutiveBadReads = 0
-            var reconnectAttempts = 0
 
             while (isActiveSafe()) {
-                if (projectionStopped) break
-
                 val out = ByteArrayOutputStream()
                 val startTime = System.currentTimeMillis()
-                var badReadThisChunk = false
-
                 while (out.size() < bytesPerChunk && System.currentTimeMillis() - startTime < chunkMillis + 500) {
-                    val rec = audioRecord
-                    if (rec == null || rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                        badReadThisChunk = true
-                        break
-                    }
+                    val rec = audioRecord ?: break
                     val n = rec.read(readBuf, 0, readBuf.size)
-                    if (n > 0) {
-                        out.write(readBuf, 0, n)
-                        consecutiveBadReads = 0
-                    } else if (n < 0) {
-                        // Negative return = AudioRecord error (e.g. ERROR_DEAD_OBJECT),
-                        // which is exactly the kind of glitch some OEMs (Huawei) cause.
-                        badReadThisChunk = true
-                        break
-                    }
+                    if (n > 0) out.write(readBuf, 0, n)
                 }
-
-                if (badReadThisChunk) {
-                    consecutiveBadReads++
-                    if (consecutiveBadReads >= 2 && !projectionStopped) {
-                        reconnectAttempts++
-                        if (reconnectAttempts >= 2) {
-                            OverlayService.updateText(applicationContext, "🔄 إعادة الاتصال... / Reconnecting...")
-                        }
-                        // Try to rebuild the AudioRecord from the same still-valid
-                        // MediaProjection, without asking the user for anything.
-                        audioRecord?.let { old ->
-                            try { old.stop() } catch (_: Exception) {}
-                            try { old.release() } catch (_: Exception) {}
-                        }
-                        audioRecord = null
-                        kotlinx.coroutines.delay(1200)
-                        if (!projectionStopped) {
-                            val fresh = buildAudioRecord(projection)
-                            if (fresh != null) {
-                                fresh.startRecording()
-                                audioRecord = fresh
-                                consecutiveBadReads = 0
-                                if (reconnectAttempts >= 2) {
-                                    OverlayService.updateText(applicationContext, "")
-                                }
-                                reconnectAttempts = 0
-                            }
-                        }
-                    }
-                    continue
-                }
-
                 if (out.size() > 0) {
                     sendChunk(out.toByteArray(), speaking, translate)
                 }
@@ -213,7 +134,7 @@ class CaptionService : Service() {
         }
     }
 
-    private fun isActiveSafe(): Boolean = job?.isCancelled != true
+    private fun isActiveSafe(): Boolean = audioRecord != null && job?.isCancelled != true
 
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String) {
         try {
@@ -244,21 +165,10 @@ class CaptionService : Service() {
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> {
-                        silentStreak = 0
-                        OverlayService.updateText(applicationContext, translated)
-                    }
+                    translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
                     serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    else -> {
-                        // Empty original/translated with no error means silence in this
-                        // chunk. A single silent chunk can just be a natural pause between
-                        // words/sentences, so don't clear immediately — only clear after
-                        // 2 consecutive silent chunks (~9s of real silence).
-                        silentStreak++
-                        if (silentStreak >= 2) {
-                            OverlayService.updateText(applicationContext, "")
-                        }
-                    }
+                    // Empty original/translated with no error just means silence in this
+                    // chunk (nothing spoken/playing) — leave the last caption on screen.
                 }
             }
         } catch (e: Exception) {
