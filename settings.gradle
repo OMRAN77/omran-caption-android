@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "OmranCaption"
-include(":app")
+include ':app'
