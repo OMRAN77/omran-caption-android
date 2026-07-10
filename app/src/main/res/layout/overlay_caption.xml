@@ -9,6 +9,7 @@
         android:layout_height="wrap_content"
         android:minWidth="200dp"
         android:maxWidth="340dp"
+        android:minHeight="60dp"
         android:padding="12dp"
         android:background="@android:color/transparent"
         android:textColor="#FFFFFF"
