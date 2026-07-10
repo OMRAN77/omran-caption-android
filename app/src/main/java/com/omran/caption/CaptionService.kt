@@ -3,8 +3,6 @@ package com.omran.caption
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
@@ -21,13 +19,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import android.util.Base64
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 import java.util.concurrent.TimeUnit
+import android.app.Service
 
 class CaptionService : Service() {
 
@@ -40,12 +40,18 @@ class CaptionService : Service() {
         .build()
 
     private val sampleRate = 16000
+    private lateinit var guestId: String
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
         val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
         val speaking = intent?.getStringExtra(EXTRA_SPEAKING) ?: "ar"
         val translate = intent?.getStringExtra(EXTRA_TRANSLATE) ?: "en"
+
+        val prefs = getSharedPreferences("omran_caption_prefs", Context.MODE_PRIVATE)
+        guestId = prefs.getString("guest_id", null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString("guest_id", it).apply()
+        }
 
         startForeground(NOTIF_ID, buildNotification())
 
@@ -133,31 +139,40 @@ class CaptionService : Service() {
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String) {
         try {
             val wav = PcmToWav.wrap(pcm, sampleRate)
-            val body = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "audio", "chunk.wav",
-                    wav.toRequestBody("audio/wav".toMediaType())
-                )
-                .addFormDataPart("sourceLang", speaking)
-                .addFormDataPart("targetLang", translate)
-                .build()
+            val audioBase64 = Base64.encodeToString(wav, Base64.NO_WRAP)
+
+            val json = JSONObject().apply {
+                put("audioBase64", audioBase64)
+                put("mimeType", "audio/wav")
+                put("sourceLang", speaking)
+                put("targetLang", translate)
+                put("guestId", guestId)
+            }
 
             val request = Request.Builder()
                 .url("$API_BASE/api/caption")
-                .post(body)
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { resp ->
                 val text = resp.body?.string() ?: return
-                val json = JSONObject(text)
-                val translated = json.optString("translated", json.optString("text", ""))
-                if (translated.isNotBlank()) {
-                    OverlayService.updateText(applicationContext, translated)
+                val body = JSONObject(text)
+                if (!resp.isSuccessful) {
+                    val err = body.optString("error", "HTTP ${resp.code}")
+                    OverlayService.updateText(applicationContext, "⚠ $err")
+                    return
+                }
+                val serverError = body.optString("translationError", "")
+                val translated = body.optString("translated", "")
+                when {
+                    translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
+                    serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
+                    // Empty original/translated with no error just means silence in this
+                    // chunk (nothing spoken/playing) — leave the last caption on screen.
                 }
             }
         } catch (e: Exception) {
-            // Network hiccup, silently retry on next chunk
+            OverlayService.updateText(applicationContext, "⚠ ${e.message ?: e.toString()}")
         }
     }
 
