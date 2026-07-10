@@ -167,8 +167,11 @@ class CaptionService : Service() {
                 when {
                     translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
                     serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    // Empty original/translated with no error just means silence in this
-                    // chunk (nothing spoken/playing) — leave the last caption on screen.
+                    else -> {
+                        // Empty original/translated with no error means silence in this
+                        // chunk (nothing spoken/playing) — clear the caption immediately.
+                        OverlayService.updateText(applicationContext, "")
+                    }
                 }
             }
         } catch (e: Exception) {
