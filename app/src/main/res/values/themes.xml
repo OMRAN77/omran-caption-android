@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.OmranCaption" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#7C5CFF</item>
+        <item name="colorPrimaryDark">#0E0B1A</item>
+        <item name="colorAccent">#00E5A0</item>
+        <item name="android:windowBackground">#0E0B1A</item>
+    </style>
+</resources>

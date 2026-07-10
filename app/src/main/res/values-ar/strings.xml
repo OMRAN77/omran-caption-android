@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Omran Caption</string>
+    <string name="start_caption">اضغط لبدء الترجمة الحية</string>
+    <string name="stop_caption">إيقاف الترجمة الحية</string>
+    <string name="speaking_lang">لغة التحدث</string>
+    <string name="translate_lang">لغة الترجمة</string>
+    <string name="go_premium">النسخة المميزة</string>
+    <string name="notif_title">Omran Caption يعمل الآن</string>
+    <string name="notif_text">جارِ التقاط صوت النظام وترجمته مباشرة</string>
+    <string name="overlay_placeholder">ستظهر الترجمة الحية هنا…</string>
+</resources>

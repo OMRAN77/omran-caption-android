@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Omran Caption</string>
+    <string name="start_caption">Click to Live Caption</string>
+    <string name="stop_caption">Stop Live Caption</string>
+    <string name="speaking_lang">Captioning language</string>
+    <string name="translate_lang">Translation language</string>
+    <string name="go_premium">Go Premium</string>
+    <string name="notif_title">Omran Caption is running</string>
+    <string name="notif_text">Capturing system audio and translating live</string>
+    <string name="overlay_placeholder">Live captions will appear here…</string>
+</resources>
