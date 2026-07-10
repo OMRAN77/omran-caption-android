@@ -10,9 +10,13 @@
         android:minWidth="200dp"
         android:maxWidth="340dp"
         android:padding="12dp"
-        android:background="#B0000000"
+        android:background="@android:color/transparent"
         android:textColor="#FFFFFF"
         android:textSize="16sp"
-        android:elevation="8dp" />
+        android:shadowColor="#FF000000"
+        android:shadowDx="1.5"
+        android:shadowDy="1.5"
+        android:shadowRadius="4"
+        android:elevation="0dp" />
 
 </FrameLayout>
