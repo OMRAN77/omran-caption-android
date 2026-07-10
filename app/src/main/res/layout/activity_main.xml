@@ -25,9 +25,12 @@
 
     <Spinner
         android:id="@+id/spinnerSpeaking"
-        android:layout_width="260dp"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp" />
+        android:layout_width="280dp"
+        android:layout_height="56dp"
+        android:minHeight="56dp"
+        android:background="@drawable/spinner_bg"
+        android:popupBackground="@drawable/spinner_popup_bg"
+        android:layout_marginBottom="20dp" />
 
     <TextView
         android:layout_width="wrap_content"

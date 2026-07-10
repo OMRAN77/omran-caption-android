@@ -36,10 +36,25 @@ class MainActivity : AppCompatActivity() {
         projectionManager = getSystemService(MediaProjectionManager::class.java)
 
         val names = languages.map { it.first }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, names)
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         binding.spinnerSpeaking.adapter = adapter
         binding.spinnerTranslate.adapter = adapter
+        binding.spinnerSpeaking.setSelection(0) // Arabic default
         binding.spinnerTranslate.setSelection(1) // English default
+
+        binding.spinnerSpeaking.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                Toast.makeText(this@MainActivity, "لغة التحدث: ${names[position]}", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        binding.spinnerTranslate.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                Toast.makeText(this@MainActivity, "لغة الترجمة: ${names[position]}", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         updateButtonState()
 
