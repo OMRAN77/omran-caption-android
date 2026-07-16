@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/paywall_bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="24dp">
+
+        <ImageButton
+            android:id="@+id/btnClosePaywall"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="end"
+            android:background="@android:color/transparent"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Close" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="✨"
+            android:textSize="48sp"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/tvPaywallTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Omran Caption Premium"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/tvPaywallSubtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ترجمة حية بلا حدود، بكل اللغات، بلا انقطاع"
+            android:textColor="#CFC9E0"
+            android:textSize="14sp"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:paddingHorizontal="16dp" />
+
+        <!-- Feature list -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="24dp"
+            android:paddingHorizontal="8dp">
+
+            <TextView android:id="@+id/feat1" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="⏱️ بدون حد يومي للترجمة" android:textColor="#FFFFFF" android:textSize="15sp"
+                android:paddingVertical="6dp" android:drawablePadding="10dp" />
+            <TextView android:id="@+id/feat2" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="🌍 كل اللغات + اللهجات مفتوحة" android:textColor="#FFFFFF" android:textSize="15sp"
+                android:paddingVertical="6dp" />
+            <TextView android:id="@+id/feat3" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="📄 تصدير الكابشن كملف SRT/نص" android:textColor="#FFFFFF" android:textSize="15sp"
+                android:paddingVertical="6dp" />
+            <TextView android:id="@+id/feat4" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="⚡ أولوية أعلى وسرعة استجابة" android:textColor="#FFFFFF" android:textSize="15sp"
+                android:paddingVertical="6dp" />
+        </LinearLayout>
+
+        <!-- Plan cards -->
+        <LinearLayout
+            android:id="@+id/cardMonthly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/plan_card_bg"
+            android:padding="18dp"
+            android:layout_marginTop="26dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="شهري" android:textColor="#FFFFFF" android:textSize="17sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tvMonthlyPrice" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="$7.99 / شهر" android:textColor="#CFC9E0" android:textSize="14sp" android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <View android:id="@+id/radioMonthly" android:layout_width="22dp" android:layout_height="22dp"
+                android:background="@drawable/spinner_bg" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/cardYearly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/plan_card_selected_bg"
+            android:padding="18dp"
+            android:layout_marginTop="14dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="سنوي" android:textColor="#FFFFFF" android:textSize="17sp" android:textStyle="bold" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="  وفّر 37%"
+                        android:textColor="#0E0B1A" android:textSize="11sp" android:textStyle="bold"
+                        android:background="@drawable/badge_save_bg"
+                        android:paddingHorizontal="8dp" android:paddingVertical="2dp"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+
+                <TextView android:id="@+id/tvYearlyPrice" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="$59.99 / سنة  (≈ $5.00/شهر)" android:textColor="#CFC9E0" android:textSize="14sp" android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <View android:id="@+id/radioYearly" android:layout_width="22dp" android:layout_height="22dp"
+                android:background="@drawable/btn_subscribe_bg" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnSubscribeNow"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="28dp"
+            android:background="@drawable/btn_subscribe_bg"
+            android:text="اشترك الآن"
+            android:textColor="#0E0B1A"
+            android:textStyle="bold"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/tvRestore"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="استعادة المشتريات"
+            android:textColor="#7C5CFF"
+            android:textSize="13sp"
+            android:layout_marginTop="18dp"
+            android:padding="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="يمكنك الإلغاء في أي وقت من إعدادات Google Play"
+            android:textColor="#7A7590"
+            android:textSize="11sp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="12dp" />
+
+    </LinearLayout>
+</ScrollView>

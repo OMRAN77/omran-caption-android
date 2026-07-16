@@ -20,6 +20,24 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var projectionManager: MediaProjectionManager
+    private var sessionStartMillis: Long = 0L
+
+    private val quotaHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val quotaWatchdog = object : Runnable {
+        override fun run() {
+            if (CaptionService.isRunning && !PremiumManager.isPremium(this@MainActivity)) {
+                val usedSoFar = ((System.currentTimeMillis() - sessionStartMillis) / 1000).toInt()
+                val remaining = PremiumManager.secondsRemainingToday(this@MainActivity) - usedSoFar
+                if (remaining <= 0) {
+                    Toast.makeText(this@MainActivity, "انتهى وقتك المجاني اليوم ⏱️", Toast.LENGTH_LONG).show()
+                    stopCaptioning()
+                    startActivity(Intent(this@MainActivity, PaywallActivity::class.java))
+                    return
+                }
+            }
+            quotaHandler.postDelayed(this, 5000)
+        }
+    }
 
     private val languages = listOf(
         "العربية" to "ar", "English" to "en", "Español" to "es", "Français" to "fr",
@@ -67,7 +85,23 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnGoPremium.setOnClickListener {
-            Toast.makeText(this, "قريبًا / Coming soon", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, PaywallActivity::class.java))
+        }
+
+        updatePremiumBadge()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePremiumBadge()
+    }
+
+    private fun updatePremiumBadge() {
+        if (PremiumManager.isPremium(this)) {
+            binding.btnGoPremium.text = "⭐ عضو مميز - Premium"
+        } else {
+            val remainingMin = PremiumManager.secondsRemainingToday(this) / 60
+            binding.btnGoPremium.text = getString(R.string.go_premium) + " ($remainingMin د متبقية اليوم)"
         }
     }
 
@@ -77,6 +111,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPermissionsAndStart() {
+        // 0) Daily free-quota check (premium users bypass)
+        if (!PremiumManager.hasFreeQuotaLeft(this)) {
+            Toast.makeText(this, "انتهى رصيدك المجاني لليوم — اشترك بالبريميوم للاستمرار بلا حدود", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, PaywallActivity::class.java))
+            return
+        }
         // 1) Mic permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
@@ -119,6 +159,8 @@ class MainActivity : AppCompatActivity() {
                     CaptionService.start(this, resultCode, data, speakingCode, translateCode)
                     OverlayService.show(this)
                     CaptionService.isRunning = true
+                    sessionStartMillis = System.currentTimeMillis()
+                    quotaHandler.postDelayed(quotaWatchdog, 5000)
                     updateButtonState()
                 } else {
                     Toast.makeText(this, "تم رفض إذن التقاط الصوت / Capture permission denied", Toast.LENGTH_LONG).show()
@@ -128,10 +170,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopCaptioning() {
+        quotaHandler.removeCallbacks(quotaWatchdog)
         CaptionService.stop(this)
         OverlayService.hide(this)
         CaptionService.isRunning = false
+        if (sessionStartMillis > 0L && !PremiumManager.isPremium(this)) {
+            val elapsedSeconds = ((System.currentTimeMillis() - sessionStartMillis) / 1000).toInt()
+            PremiumManager.addUsageSeconds(this, elapsedSeconds)
+        }
+        sessionStartMillis = 0L
         updateButtonState()
+        updatePremiumBadge()
     }
 
     companion object {
