@@ -92,7 +92,7 @@ class CaptionService : Service() {
         audioRecord?.startRecording()
 
         job = CoroutineScope(Dispatchers.IO).launch {
-            val chunkMillis = 2800L
+            val chunkMillis = 2000L
             val bytesPerChunk = (sampleRate * 2 * chunkMillis / 1000).toInt()
             val readBuf = ByteArray(4096)
 
