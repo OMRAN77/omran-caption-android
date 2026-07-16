@@ -57,12 +57,45 @@ object OverlayService {
         lp.y = 200
         params = lp
 
-        // Drag to move (on the text area)
+        // Drag to move (on the text area), plus pinch-with-two-fingers to resize.
         var initialX = 0
         var initialY = 0
         var touchX = 0f
         var touchY = 0f
+        var isScaling = false
+
+        val scaleDetector = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            private var startWidth = 0
+            private var startHeight = 0
+
+            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                isScaling = true
+                startWidth = lp.width
+                startHeight = lp.height
+                return true
+            }
+
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val factor = detector.scaleFactor
+                val newWidth = (lp.width * factor).toInt().coerceIn(minWidth, (ctx.resources.displayMetrics.widthPixels))
+                val newHeight = (lp.height * factor).toInt().coerceIn(minHeight, (ctx.resources.displayMetrics.heightPixels))
+                lp.width = newWidth
+                lp.height = newHeight
+                windowManager?.updateViewLayout(view, lp)
+                return true
+            }
+
+            override fun onScaleEnd(detector: ScaleGestureDetector) {
+                isScaling = false
+            }
+        })
+
         textView?.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            if (event.pointerCount >= 2) {
+                // Two fingers down: let the scale detector handle it, skip drag.
+                return@setOnTouchListener true
+            }
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = lp.x
@@ -72,9 +105,11 @@ object OverlayService {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    lp.x = initialX + (event.rawX - touchX).toInt()
-                    lp.y = initialY + (event.rawY - touchY).toInt()
-                    windowManager?.updateViewLayout(view, lp)
+                    if (!isScaling) {
+                        lp.x = initialX + (event.rawX - touchX).toInt()
+                        lp.y = initialY + (event.rawY - touchY).toInt()
+                        windowManager?.updateViewLayout(view, lp)
+                    }
                     true
                 }
                 else -> false

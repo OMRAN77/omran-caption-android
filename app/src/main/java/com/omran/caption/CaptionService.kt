@@ -109,8 +109,9 @@ class CaptionService : Service() {
                     // NEXT chunk starts immediately instead of waiting for the HTTP round
                     // trip to finish. This removes the growing delay/lag.
                     val data = out.toByteArray()
+                    val seq = ++chunkSeq
                     CoroutineScope(Dispatchers.IO).launch {
-                        sendChunk(data, speaking, translate)
+                        sendChunk(data, speaking, translate, seq)
                     }
                 }
             }
@@ -119,7 +120,10 @@ class CaptionService : Service() {
 
     private fun isActiveSafe(): Boolean = audioRecord != null && job?.isCancelled != true
 
-    private fun sendChunk(pcm: ByteArray, speaking: String, translate: String) {
+    private var chunkSeq = 0L
+    @Volatile private var lastAppliedSeq = 0L
+
+    private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
         try {
             val wav = PcmToWav.wrap(pcm, sampleRate)
             val audioBase64 = Base64.encodeToString(wav, Base64.NO_WRAP)
@@ -140,6 +144,12 @@ class CaptionService : Service() {
             client.newCall(request).execute().use { resp ->
                 val text = resp.body?.string() ?: return
                 val body = JSONObject(text)
+                // Chunks run in parallel, so responses can arrive out of order.
+                // Only apply this result if it's the newest one seen so far.
+                synchronized(this) {
+                    if (seq <= lastAppliedSeq) return
+                    lastAppliedSeq = seq
+                }
                 if (!resp.isSuccessful) {
                     val err = body.optString("error", "HTTP ${resp.code}")
                     OverlayService.updateText(applicationContext, "⚠ $err")
@@ -150,9 +160,9 @@ class CaptionService : Service() {
                 when {
                     translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
                     serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    // No speech detected in this chunk (silence) — clear the caption
-                    // instead of leaving stale text stuck on screen.
-                    else -> OverlayService.updateText(applicationContext, "")
+                    // No speech in this chunk (silence) — keep showing the last caption
+                    // instead of clearing it.
+                    else -> {}
                 }
             }
         } catch (e: Exception) {
