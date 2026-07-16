@@ -30,15 +30,22 @@ object OverlayService {
         val view = inflater.inflate(R.layout.overlay_caption, null)
         textView = view.findViewById(R.id.overlayText)
         textView?.text = ctx.getString(R.string.overlay_placeholder)
+        val resizeHandle = view.findViewById<View>(R.id.resizeHandle)
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
+        val density = ctx.resources.displayMetrics.density
+        val defaultWidth = (300 * density).toInt()
+        val defaultHeight = (110 * density).toInt()
+        val minWidth = (160 * density).toInt()
+        val minHeight = (70 * density).toInt()
+
         val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            defaultWidth,
+            defaultHeight,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -49,12 +56,12 @@ object OverlayService {
         lp.y = 200
         params = lp
 
-        // Drag to move; resize handle in bottom-right corner
+        // Drag to move (on the text area)
         var initialX = 0
         var initialY = 0
         var touchX = 0f
         var touchY = 0f
-        view.setOnTouchListener { _, event ->
+        textView?.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = lp.x
@@ -66,6 +73,32 @@ object OverlayService {
                 MotionEvent.ACTION_MOVE -> {
                     lp.x = initialX + (event.rawX - touchX).toInt()
                     lp.y = initialY + (event.rawY - touchY).toInt()
+                    windowManager?.updateViewLayout(view, lp)
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // Drag the bottom-right handle to resize
+        var initialWidth = 0
+        var initialHeight = 0
+        var resizeTouchX = 0f
+        var resizeTouchY = 0f
+        resizeHandle?.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialWidth = lp.width
+                    initialHeight = lp.height
+                    resizeTouchX = event.rawX
+                    resizeTouchY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val newWidth = (initialWidth + (event.rawX - resizeTouchX)).toInt()
+                    val newHeight = (initialHeight + (event.rawY - resizeTouchY)).toInt()
+                    lp.width = newWidth.coerceAtLeast(minWidth)
+                    lp.height = newHeight.coerceAtLeast(minHeight)
                     windowManager?.updateViewLayout(view, lp)
                     true
                 }
