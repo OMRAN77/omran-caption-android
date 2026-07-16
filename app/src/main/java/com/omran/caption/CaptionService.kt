@@ -122,6 +122,8 @@ class CaptionService : Service() {
 
     private var chunkSeq = 0L
     @Volatile private var lastAppliedSeq = 0L
+    @Volatile private var silentChunkCount = 0
+    private val SILENT_CHUNKS_BEFORE_CLEAR = 3
 
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
         try {
@@ -158,11 +160,23 @@ class CaptionService : Service() {
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
-                    serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    // No speech in this chunk (silence) — keep showing the last caption
-                    // instead of clearing it.
-                    else -> {}
+                    translated.isNotBlank() -> {
+                        silentChunkCount = 0
+                        OverlayService.updateText(applicationContext, translated)
+                    }
+                    serverError.isNotBlank() -> {
+                        silentChunkCount = 0
+                        OverlayService.updateText(applicationContext, "⚠ $serverError")
+                    }
+                    else -> {
+                        // No speech in this chunk (silence). Keep showing the last caption
+                        // briefly, but clear it after a few consecutive silent chunks so it
+                        // doesn't stay frozen on screen once talking has stopped.
+                        val count = ++silentChunkCount
+                        if (count >= SILENT_CHUNKS_BEFORE_CLEAR) {
+                            OverlayService.updateText(applicationContext, "")
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
