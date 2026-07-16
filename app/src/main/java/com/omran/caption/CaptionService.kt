@@ -5,12 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -31,7 +28,6 @@ import android.app.Service
 
 class CaptionService : Service() {
 
-    private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
     private var job: Job? = null
     private val client = OkHttpClient.Builder()
@@ -43,8 +39,6 @@ class CaptionService : Service() {
     private lateinit var guestId: String
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
-        val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
         val speaking = intent?.getStringExtra(EXTRA_SPEAKING) ?: "ar"
         val translate = intent?.getStringExtra(EXTRA_TRANSLATE) ?: "en"
 
@@ -54,12 +48,7 @@ class CaptionService : Service() {
         }
 
         startForeground(NOTIF_ID, buildNotification())
-
-        if (data != null) {
-            val pm = getSystemService(MediaProjectionManager::class.java)
-            mediaProjection = pm.getMediaProjection(resultCode, data)
-            startCapture(speaking, translate)
-        }
+        startCapture(speaking, translate)
         return START_STICKY
     }
 
@@ -82,31 +71,19 @@ class CaptionService : Service() {
     }
 
     private fun startCapture(speaking: String, translate: String) {
-        val projection = mediaProjection ?: return
-
-        val config = AudioPlaybackCaptureConfiguration.Builder(projection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .build()
-
         val minBuf = AudioRecord.getMinBufferSize(
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
         val bufferSize = if (minBuf > 0) minBuf * 2 else sampleRate * 2
 
-        val format = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(sampleRate)
-            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-            .build()
-
         try {
-            audioRecord = AudioRecord.Builder()
-                .setAudioFormat(format)
-                .setBufferSizeInBytes(bufferSize)
-                .setAudioPlaybackCaptureConfig(config)
-                .build()
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
         } catch (e: SecurityException) {
             OverlayService.updateText(this, "خطأ بالإذن / Permission error")
             return
@@ -182,8 +159,6 @@ class CaptionService : Service() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
-        mediaProjection?.stop()
-        mediaProjection = null
         isRunning = false
     }
 
@@ -193,15 +168,11 @@ class CaptionService : Service() {
         var isRunning = false
         private const val NOTIF_ID = 42
         private const val API_BASE = "https://tarjiman-live.vercel.app"
-        private const val EXTRA_RESULT_CODE = "resultCode"
-        private const val EXTRA_DATA = "data"
         private const val EXTRA_SPEAKING = "speaking"
         private const val EXTRA_TRANSLATE = "translate"
 
-        fun start(context: Context, resultCode: Int, data: Intent, speaking: String, translate: String) {
+        fun start(context: Context, speaking: String, translate: String) {
             val intent = Intent(context, CaptionService::class.java)
-                .putExtra(EXTRA_RESULT_CODE, resultCode)
-                .putExtra(EXTRA_DATA, data)
                 .putExtra(EXTRA_SPEAKING, speaking)
                 .putExtra(EXTRA_TRANSLATE, translate)
             context.startForegroundService(intent)

@@ -1,8 +1,6 @@
 package com.omran.caption
 
-import android.app.Activity
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,7 +17,6 @@ import com.omran.caption.databinding.ActivityMainBinding
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var projectionManager: MediaProjectionManager
     private var sessionStartMillis: Long = 0L
 
     private val quotaHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -50,8 +47,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        projectionManager = getSystemService(MediaProjectionManager::class.java)
 
         val names = languages.map { it.first }
         val adapter = ArrayAdapter(this, R.layout.spinner_item, names)
@@ -135,8 +130,19 @@ class MainActivity : AppCompatActivity() {
             startActivityForResult(intent, REQ_OVERLAY)
             return
         }
-        // 4) MediaProjection (system audio capture) permission
-        startActivityForResult(projectionManager.createScreenCaptureIntent(), REQ_PROJECTION)
+        // 4) Start capturing via microphone (works with YouTube & all apps)
+        startCaptioningNow()
+    }
+
+    private fun startCaptioningNow() {
+        val speakingCode = languages[binding.spinnerSpeaking.selectedItemPosition].second
+        val translateCode = languages[binding.spinnerTranslate.selectedItemPosition].second
+        CaptionService.start(this, speakingCode, translateCode)
+        OverlayService.show(this)
+        CaptionService.isRunning = true
+        sessionStartMillis = System.currentTimeMillis()
+        quotaHandler.postDelayed(quotaWatchdog, 5000)
+        updateButtonState()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -152,20 +158,6 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQ_OVERLAY -> requestPermissionsAndStart()
-            REQ_PROJECTION -> {
-                if (resultCode == Activity.RESULT_OK && data != null) {
-                    val speakingCode = languages[binding.spinnerSpeaking.selectedItemPosition].second
-                    val translateCode = languages[binding.spinnerTranslate.selectedItemPosition].second
-                    CaptionService.start(this, resultCode, data, speakingCode, translateCode)
-                    OverlayService.show(this)
-                    CaptionService.isRunning = true
-                    sessionStartMillis = System.currentTimeMillis()
-                    quotaHandler.postDelayed(quotaWatchdog, 5000)
-                    updateButtonState()
-                } else {
-                    Toast.makeText(this, "تم رفض إذن التقاط الصوت / Capture permission denied", Toast.LENGTH_LONG).show()
-                }
-            }
         }
     }
 
@@ -187,6 +179,5 @@ class MainActivity : AppCompatActivity() {
         private const val REQ_MIC = 1
         private const val REQ_NOTIF = 2
         private const val REQ_OVERLAY = 3
-        private const val REQ_PROJECTION = 4
     }
 }
