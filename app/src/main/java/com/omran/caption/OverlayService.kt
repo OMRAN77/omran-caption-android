@@ -50,9 +50,10 @@ object OverlayService {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
+        val prefs = ctx.getSharedPreferences("overlay_pos", Context.MODE_PRIVATE)
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = 0
-        lp.y = 200
+        lp.x = prefs.getInt("x", 0)
+        lp.y = prefs.getInt("y", 200)
         params = lp
 
         // Drag the text itself to move the overlay.
@@ -74,6 +75,10 @@ object OverlayService {
                     lp.x = initialX + (event.rawX - touchX).toInt()
                     lp.y = initialY + (event.rawY - touchY).toInt()
                     windowManager?.updateViewLayout(view, lp)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    prefs.edit().putInt("x", lp.x).putInt("y", lp.y).apply()
                     true
                 }
                 else -> false
