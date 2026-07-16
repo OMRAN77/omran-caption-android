@@ -92,20 +92,26 @@ class CaptionService : Service() {
         audioRecord?.startRecording()
 
         job = CoroutineScope(Dispatchers.IO).launch {
-            val chunkMillis = 4500L
+            val chunkMillis = 2800L
             val bytesPerChunk = (sampleRate * 2 * chunkMillis / 1000).toInt()
             val readBuf = ByteArray(4096)
 
             while (isActiveSafe()) {
                 val out = ByteArrayOutputStream()
                 val startTime = System.currentTimeMillis()
-                while (out.size() < bytesPerChunk && System.currentTimeMillis() - startTime < chunkMillis + 500) {
+                while (out.size() < bytesPerChunk && System.currentTimeMillis() - startTime < chunkMillis + 300) {
                     val rec = audioRecord ?: break
                     val n = rec.read(readBuf, 0, readBuf.size)
                     if (n > 0) out.write(readBuf, 0, n)
                 }
                 if (out.size() > 0) {
-                    sendChunk(out.toByteArray(), speaking, translate)
+                    // Fire off the network request on its own coroutine so capture of the
+                    // NEXT chunk starts immediately instead of waiting for the HTTP round
+                    // trip to finish. This removes the growing delay/lag.
+                    val data = out.toByteArray()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        sendChunk(data, speaking, translate)
+                    }
                 }
             }
         }
@@ -144,8 +150,9 @@ class CaptionService : Service() {
                 when {
                     translated.isNotBlank() -> OverlayService.updateText(applicationContext, translated)
                     serverError.isNotBlank() -> OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    // Empty original/translated with no error just means silence in this
-                    // chunk (nothing spoken/playing) — leave the last caption on screen.
+                    // No speech detected in this chunk (silence) — clear the caption
+                    // instead of leaving stale text stuck on screen.
+                    else -> OverlayService.updateText(applicationContext, "")
                 }
             }
         } catch (e: Exception) {
