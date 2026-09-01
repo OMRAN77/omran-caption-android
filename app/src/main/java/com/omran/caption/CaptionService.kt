@@ -198,7 +198,7 @@ class CaptionService : Service() {
     companion object {
         var isRunning = false
         private const val NOTIF_ID = 42
-        private const val API_BASE = "https://tarjiman-live.vercel.app"
+        private const val API_BASE = "https://omran-caption.vercel.app"
         private const val EXTRA_SPEAKING = "speaking"
         private const val EXTRA_TRANSLATE = "translate"
 
