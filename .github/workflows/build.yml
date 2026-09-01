@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# نحتاج صلاحية الكتابة لنشر ملف الـ APK في Release عام قابل للتحميل بلا تسجيل دخول
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,8 +32,33 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
+      # اسم ثابت وواضح للملف حتى يبقى رابط التحميل ثابتًا عبر التحديثات
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/omran-caption.apk
+
+      # نسخة احتياطية كـ Artifact (تتطلب تسجيل دخول) — تبقى مفيدة للتشخيص
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: omran-caption-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: omran-caption-apk
+          path: dist/omran-caption.apk
+
+      # النشر في Release بوسم ثابت "latest" — يعطي رابط تحميل عام دائم:
+      # https://github.com/OMRAN77/omran-caption-android/releases/latest/download/omran-caption.apk
+      - name: Publish to GitHub Release (latest)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Omran Caption (أحدث نسخة)
+          body: |
+            أحدث نسخة من تطبيق عمران كابشن للأندرويد.
+
+            رابط التحميل المباشر (بلا تسجيل دخول):
+            https://github.com/OMRAN77/omran-caption-android/releases/latest/download/omran-caption.apk
+
+            للتثبيت: نزّل الملف على هاتفك ثم افتحه، واسمح بتثبيت التطبيقات من هذا المصدر.
+          files: dist/omran-caption.apk
+          make_latest: true
