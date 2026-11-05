@@ -18,10 +18,14 @@ object PremiumManager {
 
     const val FREE_DAILY_LIMIT_SECONDS = 10 * 60 // 10 minutes/day
 
+    // نسخة خاصة: بلا حد يومي ولا شاشة اشتراك. اجعلها false لإرجاع الحد والبريميوم.
+    private const val PRIVATE_UNLIMITED = true
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun today() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
     fun isPremium(ctx: Context): Boolean {
+        if (PRIVATE_UNLIMITED) return true
         val p = prefs(ctx)
         if (!p.getBoolean(KEY_IS_PREMIUM, false)) return false
         val expiry = p.getLong(KEY_EXPIRY, 0L)
