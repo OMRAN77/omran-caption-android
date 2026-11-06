@@ -27,11 +27,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".PaywallActivity"
-            android:exported="false"
-            android:theme="@style/Theme.OmranCaption" />
-
         <service
             android:name=".CaptionService"
             android:exported="false"
