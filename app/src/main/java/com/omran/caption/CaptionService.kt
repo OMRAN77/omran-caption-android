@@ -126,18 +126,28 @@ class CaptionService : Service() {
     @Volatile private var lastAppliedSeq = 0L
     // Slices in a row with no words (silence, music only): after 3 (about 4 s)
     // the caption is cleared instead of staying frozen on the last words.
-    @Volatile private var emptyStreak = 0
+    private var emptyStreak = 0 // guarded by captionLock
     // Last lines heard, sent as context so the translation of each short slice
     // follows the sentence it belongs to.
     private val recentOriginals = ArrayDeque<String>()
 
-    private fun showCaption(text: String) {
-        emptyStreak = 0
+    // The capture loop and the reply coroutines both touch the caption: one
+    // lock keeps "reset the count + show" and "count + clear" from interleaving.
+    private val captionLock = Any()
+
+    private fun showCaption(text: String, isError: Boolean = false) = synchronized(captionLock) {
+        // A warning does not hold the screen: the next empty slices clear it.
+        if (!isError) emptyStreak = 0
         OverlayService.updateText(applicationContext, text)
     }
 
-    private fun noteEmpty() {
-        if (++emptyStreak == EMPTY_BEFORE_CLEAR) OverlayService.updateText(applicationContext, "")
+    private fun noteEmpty() = synchronized(captionLock) {
+        // ">=" as in the first version: a warning shown after the count passed 3
+        // is cleared by the next empty slice.
+        if (++emptyStreak >= EMPTY_BEFORE_CLEAR) {
+            emptyStreak = EMPTY_BEFORE_CLEAR
+            OverlayService.updateText(applicationContext, "")
+        }
     }
 
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
@@ -170,7 +180,7 @@ class CaptionService : Service() {
                 }
                 if (!resp.isSuccessful) {
                     val err = body.optString("error", "HTTP ${resp.code}")
-                    showCaption("⚠ $err")
+                    showCaption("⚠ $err", isError = true)
                     return
                 }
                 val original = body.optString("original", "")
@@ -182,12 +192,14 @@ class CaptionService : Service() {
                 val translated = body.optString("translated", "")
                 when {
                     translated.isNotBlank() -> showCaption(translated)
-                    serverError.isNotBlank() -> showCaption("⚠ $serverError")
+                    serverError.isNotBlank() -> showCaption("⚠ $serverError", isError = true)
                     else -> noteEmpty() // no words in this slice (music, noise)
                 }
             }
         } catch (e: Exception) {
-            showCaption("⚠ ${e.message ?: e.toString()}")
+            // A failed old request must not cover a newer caption.
+            synchronized(this) { if (seq < lastAppliedSeq) return }
+            showCaption("⚠ ${e.message ?: e.toString()}", isError = true)
         }
     }
 
