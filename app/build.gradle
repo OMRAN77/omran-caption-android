@@ -11,8 +11,13 @@ android {
         applicationId 'com.omran.caption'
         minSdk 29
         targetSdk 34
-        versionCode 5
-        versionName '1.4.0'
+        versionCode 6
+        versionName '1.5.0'
+        // Huawei phones are ARM; leaving out x86 keeps the speech detector's
+        // native library from bloating the APK.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
     }
 
     signingConfigs {
@@ -55,6 +60,13 @@ android {
     buildFeatures {
         viewBinding true
     }
+
+    // Native libraries stored compressed: a smaller APK to download.
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
 }
 
 dependencies {
@@ -66,4 +78,6 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.json:json:20240303'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    // Runs the Silero speech detector (assets/silero_vad.onnx) on the phone.
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.22.0'
 }

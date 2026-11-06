@@ -15,6 +15,11 @@ data class RemoteSettings(
     val quietRatio: Double = 0.5,
     val emptyBeforeClear: Int = 3,
     val contextLines: Int = 2,
+    // Speech detector: a slice is sent only with at least minSpeechMs of
+    // speech (Silero probability >= vadThreshold) in it.
+    val vadEnabled: Boolean = true,
+    val vadThreshold: Double = 0.35,
+    val minSpeechMs: Int = 128,
 ) {
     companion object {
         /** Parses the server's JSON; returns defaults for anything missing or out of range. */
@@ -31,6 +36,9 @@ data class RemoteSettings(
                     quietRatio = j.optDouble("quietRatio", d.quietRatio).let { if (it.isNaN()) d.quietRatio else it.coerceIn(0.05, 1.0) },
                     emptyBeforeClear = j.optInt("emptyBeforeClear", d.emptyBeforeClear).coerceIn(1, 20),
                     contextLines = j.optInt("contextLines", d.contextLines).coerceIn(0, 5),
+                    vadEnabled = j.optBoolean("vadEnabled", d.vadEnabled),
+                    vadThreshold = j.optDouble("vadThreshold", d.vadThreshold).let { if (it.isNaN()) d.vadThreshold else it.coerceIn(0.05, 0.95) },
+                    minSpeechMs = j.optInt("minSpeechMs", d.minSpeechMs).coerceIn(0, 1000),
                 )
             } catch (e: Exception) {
                 d
