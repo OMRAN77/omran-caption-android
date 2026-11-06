@@ -16,6 +16,16 @@ android {
     }
 
     signingConfigs {
+        // Fixed key kept in the repo: every CI build has the same signature, so
+        // a new APK installs as an update over the old one (no uninstall). The
+        // default debug key is random on each CI machine. Install only from
+        // this repo's release link: anyone with this key could sign an "update".
+        debug {
+            storeFile file('omran-debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
         release {
             def ksPath = System.getenv("KEYSTORE_PATH")
             if (ksPath != null && file(ksPath).exists()) {

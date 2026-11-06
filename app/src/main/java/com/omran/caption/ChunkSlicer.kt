@@ -15,10 +15,20 @@ package com.omran.caption
  */
 class ChunkSlicer(
     private val sampleRate: Int,
-    private val minMs: Int = 1100,
-    private val maxMs: Int = 1500,
+    @Volatile private var minMs: Int = 1100,
+    @Volatile private var maxMs: Int = 1500,
+    @Volatile private var silence: Double = 0.002,      // about -54 dBFS: nothing audible
+    @Volatile private var quietRatio: Double = 0.5,     // a frame 6 dB under the slice's typical level
 ) {
     class Slice(val pcm: ByteArray, val silent: Boolean)
+
+    /** New values from the server; used from the next frame on. */
+    fun configure(minMs: Int, maxMs: Int, silence: Double, quietRatio: Double) {
+        this.minMs = minMs
+        this.maxMs = maxOf(maxMs, minMs + 100)
+        this.silence = silence
+        this.quietRatio = quietRatio
+    }
 
     private val bytesPerMs = sampleRate * 2 / 1000
     private val frames = ArrayList<ByteArray>()
@@ -33,11 +43,13 @@ class ChunkSlicer(
         levels.add(rms(frame))
         totalBytes += len
         val ms = totalBytes / bytesPerMs
+        val minMs = minMs
+        val maxMs = maxOf(maxMs, minMs + 100)
         if (ms < minMs) return null
 
         // Past the minimum: cut right after a quiet frame (a gap between words).
         val level = levels.last()
-        if (level < SILENCE || level <= median() * QUIET_RATIO) return cut(frames.size)
+        if (level < silence || level <= median() * quietRatio) return cut(frames.size)
 
         if (ms < maxMs) return null
         // No gap yet: cut after the quietest frame that ends past the minimum.
@@ -63,7 +75,7 @@ class ChunkSlicer(
         frames.subList(0, k).clear()
         levels.subList(0, k).clear()
         totalBytes -= size
-        return Slice(out, loud < SILENCE)
+        return Slice(out, loud < silence)
     }
 
     private fun median(): Double {
@@ -83,10 +95,5 @@ class ChunkSlicer(
             i += 2
         }
         return if (n == 0) 0.0 else Math.sqrt(sum / n) / 32768.0
-    }
-
-    private companion object {
-        const val SILENCE = 0.002      // about -54 dBFS: nothing audible
-        const val QUIET_RATIO = 0.5    // a frame 6 dB under the slice's typical level
     }
 }

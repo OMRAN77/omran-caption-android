@@ -35,6 +35,8 @@ class CaptionService : Service() {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    private val configClient = client.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
+
     private val sampleRate = 16000
     private lateinit var guestId: String
 
@@ -97,6 +99,13 @@ class CaptionService : Service() {
             // coroutine without waiting for the previous reply; the newest reply
             // is shown. ChunkSlicer ends each slice in the gap between two words.
             val slicer = ChunkSlicer(sampleRate)
+            // Tuning comes from the server (api/config.js), so it can change
+            // without a new APK: start with the last values received, then
+            // apply fresh ones as soon as they arrive (capture does not wait).
+            val prefs = getSharedPreferences("omran_caption_prefs", Context.MODE_PRIVATE)
+            settings = RemoteSettings.fromJson(prefs.getString(KEY_SETTINGS, null))
+            applySettings(slicer)
+            CoroutineScope(Dispatchers.IO).launch { fetchSettings(slicer) }
             val frame = ByteArray(sampleRate * 2 * 50 / 1000) // 50 ms
 
             while (isActiveSafe()) {
@@ -122,10 +131,34 @@ class CaptionService : Service() {
 
     private fun isActiveSafe(): Boolean = audioRecord != null && job?.isCancelled != true
 
+    @Volatile private var settings = RemoteSettings()
+
+    private fun applySettings(slicer: ChunkSlicer) {
+        val s = settings
+        slicer.configure(s.sliceMinMs, s.sliceMaxMs, s.silenceRms, s.quietRatio)
+    }
+
+    private fun fetchSettings(slicer: ChunkSlicer) {
+        try {
+            val request = Request.Builder().url("$API_BASE/api/config").build()
+            configClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return
+                val text = resp.body?.string() ?: return
+                settings = RemoteSettings.fromJson(text)
+                applySettings(slicer)
+                getSharedPreferences("omran_caption_prefs", Context.MODE_PRIVATE)
+                    .edit().putString(KEY_SETTINGS, text).apply()
+            }
+        } catch (e: Exception) {
+            // Offline or server down: keep the last values (or the defaults).
+        }
+    }
+
     private var chunkSeq = 0L
     @Volatile private var lastAppliedSeq = 0L
-    // Slices in a row with no words (silence, music only): after 3 (about 4 s)
-    // the caption is cleared instead of staying frozen on the last words.
+    // Slices in a row with no words (silence, music only): after
+    // settings.emptyBeforeClear (3, about 4 s) the caption is cleared instead
+    // of staying frozen on the last words.
     private var emptyStreak = 0 // guarded by captionLock
     // Last lines heard, sent as context so the translation of each short slice
     // follows the sentence it belongs to.
@@ -144,8 +177,9 @@ class CaptionService : Service() {
     private fun noteEmpty() = synchronized(captionLock) {
         // ">=" as in the first version: a warning shown after the count passed 3
         // is cleared by the next empty slice.
-        if (++emptyStreak >= EMPTY_BEFORE_CLEAR) {
-            emptyStreak = EMPTY_BEFORE_CLEAR
+        val limit = settings.emptyBeforeClear
+        if (++emptyStreak >= limit) {
+            emptyStreak = limit
             OverlayService.updateText(applicationContext, "")
         }
     }
@@ -186,7 +220,7 @@ class CaptionService : Service() {
                 val original = body.optString("original", "")
                 if (original.isNotBlank()) synchronized(recentOriginals) {
                     recentOriginals.addLast(original)
-                    while (recentOriginals.size > 2) recentOriginals.removeFirst()
+                    while (recentOriginals.size > settings.contextLines) recentOriginals.removeFirst()
                 }
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
@@ -217,7 +251,7 @@ class CaptionService : Service() {
     companion object {
         var isRunning = false
         private const val NOTIF_ID = 42
-        private const val EMPTY_BEFORE_CLEAR = 3
+        private const val KEY_SETTINGS = "remote_settings"
         private const val API_BASE = "https://omran-caption.vercel.app"
         private const val EXTRA_SPEAKING = "speaking"
         private const val EXTRA_TRANSLATE = "translate"
