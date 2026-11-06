@@ -107,24 +107,39 @@ class CaptionService : Service() {
             applySettings(slicer)
             CoroutineScope(Dispatchers.IO).launch { fetchSettings(slicer) }
             val frame = ByteArray(sampleRate * 2 * 50 / 1000) // 50 ms
+            // Speech detector (Silero VAD on the phone): slices with only silence,
+            // room noise or music are not sent, since Whisper invents text for
+            // them ("شكراً لك" on the home screen, lines for instrumental music).
+            val detector = createSpeechDetector()
+            var lastHadSpeech = false
 
-            while (isActiveSafe()) {
-                val rec = audioRecord ?: break
-                val n = rec.read(frame, 0, frame.size)
-                if (n <= 0) {
-                    Thread.sleep(10)
-                    continue
+            try {
+                while (isActiveSafe()) {
+                    val rec = audioRecord ?: break
+                    val n = rec.read(frame, 0, frame.size)
+                    if (n <= 0) {
+                        Thread.sleep(10)
+                        continue
+                    }
+                    detector.feed(frame, n)
+                    val slice = slicer.feed(frame, n) ?: continue
+                    val s = settings
+                    val speechMs = if (s.vadEnabled) detector.speechMs(slice.startSample, slice.endSample) else Int.MAX_VALUE
+                    // Right after a slice with speech, any speech is enough (the end of a word).
+                    val hasSpeech = !slice.silent && (speechMs >= s.minSpeechMs || (lastHadSpeech && speechMs > 0))
+                    lastHadSpeech = hasSpeech
+                    if (!hasSpeech) {
+                        // Not sent, but counts towards clearing the caption.
+                        noteEmpty()
+                        continue
+                    }
+                    val seq = ++chunkSeq
+                    CoroutineScope(Dispatchers.IO).launch {
+                        sendChunk(slice.pcm, speaking, translate, seq)
+                    }
                 }
-                val slice = slicer.feed(frame, n) ?: continue
-                if (slice.silent) {
-                    // Nothing audible: not sent, but counts towards clearing the caption.
-                    noteEmpty()
-                    continue
-                }
-                val seq = ++chunkSeq
-                CoroutineScope(Dispatchers.IO).launch {
-                    sendChunk(slice.pcm, speaking, translate, seq)
-                }
+            } finally {
+                detector.close()
             }
         }
     }
@@ -132,6 +147,12 @@ class CaptionService : Service() {
     private fun isActiveSafe(): Boolean = audioRecord != null && job?.isCancelled != true
 
     @Volatile private var settings = RemoteSettings()
+
+    /** Silero VAD from the bundled model, or the simple loudness check if it cannot run here. */
+    private fun createSpeechDetector(): SpeechDetector {
+        val model = try { assets.open("silero_vad.onnx").use { it.readBytes() } } catch (e: Exception) { null }
+        return model?.let { m -> SileroVad.create(m) { settings.vadThreshold.toFloat() } } ?: EnergyGate()
+    }
 
     private fun applySettings(slicer: ChunkSlicer) {
         val s = settings

@@ -20,7 +20,8 @@ class ChunkSlicer(
     @Volatile private var silence: Double = 0.002,      // about -54 dBFS: nothing audible
     @Volatile private var quietRatio: Double = 0.5,     // a frame 6 dB under the slice's typical level
 ) {
-    class Slice(val pcm: ByteArray, val silent: Boolean)
+    /** [startSample, endSample): where the slice sits in the stream (samples since start). */
+    class Slice(val pcm: ByteArray, val silent: Boolean, val startSample: Long, val endSample: Long)
 
     /** New values from the server; used from the next frame on. */
     fun configure(minMs: Int, maxMs: Int, silence: Double, quietRatio: Double) {
@@ -34,6 +35,7 @@ class ChunkSlicer(
     private val frames = ArrayList<ByteArray>()
     private val levels = ArrayList<Double>()
     private var totalBytes = 0
+    private var emittedSamples = 0L
 
     /** Feeds one read of PCM. Returns a finished slice, or null. */
     fun feed(buf: ByteArray, len: Int): Slice? {
@@ -75,7 +77,9 @@ class ChunkSlicer(
         frames.subList(0, k).clear()
         levels.subList(0, k).clear()
         totalBytes -= size
-        return Slice(out, loud < silence)
+        val start = emittedSamples
+        emittedSamples += size / 2
+        return Slice(out, loud < silence, start, emittedSamples)
     }
 
     private fun median(): Double {
