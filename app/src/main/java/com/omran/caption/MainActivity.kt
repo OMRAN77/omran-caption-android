@@ -25,9 +25,9 @@ class MainActivity : AppCompatActivity() {
         "हिन्दी" to "hi", "اردو" to "ur", "Bahasa Indonesia" to "id"
     )
 
-    // لغة التحدث: "تلقائي" يكتشف لغة الكلام (فيديو صيني، تركي، ...). بدونها كان
-    // اختيار العربية يجبر Whisper على العربية فيخرج كلامًا خاطئًا من الصوت الأجنبي.
-    private val speakingLanguages = listOf("تلقائي (أي لغة)" to "auto") + languages
+    // لغة التحدث تكون محددة (مثل النسخة الأولى): التعرف التلقائي على مقاطع
+    // ثانية واحدة يغلط في اللغة. الاختيار ينحفظ؛ الافتراضي صيني -> عربي.
+    private val speakingLanguages = languages
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,9 +45,11 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerSpeaking.adapter = speakAdapter
         binding.spinnerTranslate.adapter = adapter
         // Defaults: detect the spoken language, captions in Arabic; then remember the choice.
-        val savedSpeak = prefs.getString(KEY_SPEAK, "auto")
+        // A value the list no longer has (the old "auto") falls back to Chinese.
+        val savedSpeak = prefs.getString(KEY_SPEAK, "zh")
         val savedTranslate = prefs.getString(KEY_TRANSLATE, "ar")
-        binding.spinnerSpeaking.setSelection(speakingLanguages.indexOfFirst { it.second == savedSpeak }.coerceAtLeast(0))
+        val speakIndex = speakingLanguages.indexOfFirst { it.second == savedSpeak }
+        binding.spinnerSpeaking.setSelection(if (speakIndex >= 0) speakIndex else speakingLanguages.indexOfFirst { it.second == "zh" })
         binding.spinnerTranslate.setSelection(languages.indexOfFirst { it.second == savedTranslate }.coerceAtLeast(0))
 
         binding.spinnerSpeaking.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
