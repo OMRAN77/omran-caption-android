@@ -19,9 +19,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import android.util.Base64
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import android.app.Service
@@ -34,8 +34,6 @@ class CaptionService : Service() {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
-
-    private val configClient = client.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
 
     private val sampleRate = 16000
     private lateinit var guestId: String
@@ -94,116 +92,38 @@ class CaptionService : Service() {
         audioRecord?.startRecording()
 
         job = CoroutineScope(Dispatchers.IO).launch {
-            // As in the first version of the app, whose captions kept up with the
-            // speech: a short slice about every 1.2 s, each sent at once on its own
-            // coroutine without waiting for the previous reply; the newest reply
-            // is shown. ChunkSlicer ends each slice in the gap between two words.
-            val slicer = ChunkSlicer(sampleRate)
-            // Tuning comes from the server (api/config.js), so it can change
-            // without a new APK: start with the last values received, then
-            // apply fresh ones as soon as they arrive (capture does not wait).
-            val prefs = getSharedPreferences("omran_caption_prefs", Context.MODE_PRIVATE)
-            settings = RemoteSettings.fromJson(prefs.getString(KEY_SETTINGS, null))
-            applySettings(slicer)
-            CoroutineScope(Dispatchers.IO).launch { fetchSettings(slicer) }
-            val frame = ByteArray(sampleRate * 2 * 50 / 1000) // 50 ms
-            // Speech detector (Silero VAD on the phone): slices with only silence,
-            // room noise or music are not sent, since Whisper invents text for
-            // them ("شكراً لك" on the home screen, lines for instrumental music).
-            val detector = createSpeechDetector()
-            var lastHadSpeech = false
+            val chunkMillis = 1200L
+            val bytesPerChunk = (sampleRate * 2 * chunkMillis / 1000).toInt()
+            val readBuf = ByteArray(4096)
 
-            try {
-                while (isActiveSafe()) {
+            while (isActiveSafe()) {
+                val out = ByteArrayOutputStream()
+                val startTime = System.currentTimeMillis()
+                while (out.size() < bytesPerChunk && System.currentTimeMillis() - startTime < chunkMillis + 300) {
                     val rec = audioRecord ?: break
-                    val n = rec.read(frame, 0, frame.size)
-                    if (n <= 0) {
-                        Thread.sleep(10)
-                        continue
-                    }
-                    detector.feed(frame, n)
-                    val slice = slicer.feed(frame, n) ?: continue
-                    val s = settings
-                    val speechMs = if (s.vadEnabled) detector.speechMs(slice.startSample, slice.endSample) else Int.MAX_VALUE
-                    // Right after a slice with speech, any speech is enough (the end of a word).
-                    val hasSpeech = !slice.silent && (speechMs >= s.minSpeechMs || (lastHadSpeech && speechMs > 0))
-                    lastHadSpeech = hasSpeech
-                    if (!hasSpeech) {
-                        // Not sent, but counts towards clearing the caption.
-                        noteEmpty()
-                        continue
-                    }
+                    val n = rec.read(readBuf, 0, readBuf.size)
+                    if (n > 0) out.write(readBuf, 0, n)
+                }
+                if (out.size() > 0) {
+                    // Fire off the network request on its own coroutine so capture of the
+                    // NEXT chunk starts immediately instead of waiting for the HTTP round
+                    // trip to finish. This removes the growing delay/lag.
+                    val data = out.toByteArray()
                     val seq = ++chunkSeq
                     CoroutineScope(Dispatchers.IO).launch {
-                        sendChunk(slice.pcm, speaking, translate, seq)
+                        sendChunk(data, speaking, translate, seq)
                     }
                 }
-            } finally {
-                detector.close()
             }
         }
     }
 
     private fun isActiveSafe(): Boolean = audioRecord != null && job?.isCancelled != true
 
-    @Volatile private var settings = RemoteSettings()
-
-    /** Silero VAD from the bundled model, or the simple loudness check if it cannot run here. */
-    private fun createSpeechDetector(): SpeechDetector {
-        val model = try { assets.open("silero_vad.onnx").use { it.readBytes() } } catch (e: Exception) { null }
-        return model?.let { m -> SileroVad.create(m) { settings.vadThreshold.toFloat() } } ?: EnergyGate()
-    }
-
-    private fun applySettings(slicer: ChunkSlicer) {
-        val s = settings
-        slicer.configure(s.sliceMinMs, s.sliceMaxMs, s.silenceRms, s.quietRatio)
-    }
-
-    private fun fetchSettings(slicer: ChunkSlicer) {
-        try {
-            val request = Request.Builder().url("$API_BASE/api/config").build()
-            configClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return
-                val text = resp.body?.string() ?: return
-                settings = RemoteSettings.fromJson(text)
-                applySettings(slicer)
-                getSharedPreferences("omran_caption_prefs", Context.MODE_PRIVATE)
-                    .edit().putString(KEY_SETTINGS, text).apply()
-            }
-        } catch (e: Exception) {
-            // Offline or server down: keep the last values (or the defaults).
-        }
-    }
-
     private var chunkSeq = 0L
     @Volatile private var lastAppliedSeq = 0L
-    // Slices in a row with no words (silence, music only): after
-    // settings.emptyBeforeClear (3, about 4 s) the caption is cleared instead
-    // of staying frozen on the last words.
-    private var emptyStreak = 0 // guarded by captionLock
-    // Last lines heard, sent as context so the translation of each short slice
-    // follows the sentence it belongs to.
-    private val recentOriginals = ArrayDeque<String>()
-
-    // The capture loop and the reply coroutines both touch the caption: one
-    // lock keeps "reset the count + show" and "count + clear" from interleaving.
-    private val captionLock = Any()
-
-    private fun showCaption(text: String, isError: Boolean = false) = synchronized(captionLock) {
-        // A warning does not hold the screen: the next empty slices clear it.
-        if (!isError) emptyStreak = 0
-        OverlayService.updateText(applicationContext, text)
-    }
-
-    private fun noteEmpty() = synchronized(captionLock) {
-        // ">=" as in the first version: a warning shown after the count passed 3
-        // is cleared by the next empty slice.
-        val limit = settings.emptyBeforeClear
-        if (++emptyStreak >= limit) {
-            emptyStreak = limit
-            OverlayService.updateText(applicationContext, "")
-        }
-    }
+    @Volatile private var silentChunkCount = 0
+    private val SILENT_CHUNKS_BEFORE_CLEAR = 3
 
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
         try {
@@ -216,7 +136,6 @@ class CaptionService : Service() {
                 put("sourceLang", speaking)
                 put("targetLang", translate)
                 put("guestId", guestId)
-                put("context", JSONArray(synchronized(recentOriginals) { recentOriginals.toList() }))
             }
 
             val request = Request.Builder()
@@ -235,26 +154,33 @@ class CaptionService : Service() {
                 }
                 if (!resp.isSuccessful) {
                     val err = body.optString("error", "HTTP ${resp.code}")
-                    showCaption("⚠ $err", isError = true)
+                    OverlayService.updateText(applicationContext, "⚠ $err")
                     return
-                }
-                val original = body.optString("original", "")
-                if (original.isNotBlank()) synchronized(recentOriginals) {
-                    recentOriginals.addLast(original)
-                    while (recentOriginals.size > settings.contextLines) recentOriginals.removeFirst()
                 }
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> showCaption(translated)
-                    serverError.isNotBlank() -> showCaption("⚠ $serverError", isError = true)
-                    else -> noteEmpty() // no words in this slice (music, noise)
+                    translated.isNotBlank() -> {
+                        silentChunkCount = 0
+                        OverlayService.updateText(applicationContext, translated)
+                    }
+                    serverError.isNotBlank() -> {
+                        silentChunkCount = 0
+                        OverlayService.updateText(applicationContext, "⚠ $serverError")
+                    }
+                    else -> {
+                        // No speech in this chunk (silence). Keep showing the last caption
+                        // briefly, but clear it after a few consecutive silent chunks so it
+                        // doesn't stay frozen on screen once talking has stopped.
+                        val count = ++silentChunkCount
+                        if (count >= SILENT_CHUNKS_BEFORE_CLEAR) {
+                            OverlayService.updateText(applicationContext, "")
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
-            // A failed old request must not cover a newer caption.
-            synchronized(this) { if (seq < lastAppliedSeq) return }
-            showCaption("⚠ ${e.message ?: e.toString()}", isError = true)
+            OverlayService.updateText(applicationContext, "⚠ ${e.message ?: e.toString()}")
         }
     }
 
@@ -272,7 +198,6 @@ class CaptionService : Service() {
     companion object {
         var isRunning = false
         private const val NOTIF_ID = 42
-        private const val KEY_SETTINGS = "remote_settings"
         private const val API_BASE = "https://omran-caption.vercel.app"
         private const val EXTRA_SPEAKING = "speaking"
         private const val EXTRA_TRANSLATE = "translate"
