@@ -111,7 +111,7 @@ class CaptionService : Service() {
                     // phrase continues while this one is being translated.
                     val seq = ++chunkSeq
                     CoroutineScope(Dispatchers.IO).launch {
-                        sendChunk(phrase, speaking, translate, seq)
+                        sendChunk(phrase, speaking, translate, seq, detector)
                     }
                 }
                 // People stopped talking: clear the caption after a few seconds
@@ -140,7 +140,7 @@ class CaptionService : Service() {
         OverlayService.updateText(applicationContext, text)
     }
 
-    private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
+    private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long, detector: PhraseDetector) {
         try {
             val wav = PcmToWav.wrap(pcm, sampleRate)
             val audioBase64 = Base64.encodeToString(wav, Base64.NO_WRAP)
@@ -162,6 +162,10 @@ class CaptionService : Service() {
             client.newCall(request).execute().use { resp ->
                 val text = resp.body?.string() ?: return
                 val body = JSONObject(text)
+                // Tell the detector whether the server heard words (an empty
+                // "original" means music/noise only), late replies included.
+                // Errors (quota, network) say nothing about the audio.
+                if (resp.isSuccessful) detector.serverResult(body.optString("original", "").isNotBlank())
                 // Chunks run in parallel, so responses can arrive out of order.
                 // Only apply this result if it's the newest one seen so far.
                 synchronized(this) {
