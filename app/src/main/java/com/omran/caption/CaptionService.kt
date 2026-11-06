@@ -19,9 +19,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import android.util.Base64
-import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import android.app.Service
@@ -92,27 +92,34 @@ class CaptionService : Service() {
         audioRecord?.startRecording()
 
         job = CoroutineScope(Dispatchers.IO).launch {
-            val chunkMillis = 1200L
-            val bytesPerChunk = (sampleRate * 2 * chunkMillis / 1000).toInt()
-            val readBuf = ByteArray(4096)
+            // Send whole spoken phrases (cut at the speaker's pause), never
+            // silence. Fixed 1.2 s slices cut words in half, showed only the
+            // last word, and sent ~50 requests/minute (over Groq's limits).
+            val detector = PhraseDetector(sampleRate)
+            val frame = ByteArray(sampleRate * 2 * 50 / 1000) // 50 ms
 
             while (isActiveSafe()) {
-                val out = ByteArrayOutputStream()
-                val startTime = System.currentTimeMillis()
-                while (out.size() < bytesPerChunk && System.currentTimeMillis() - startTime < chunkMillis + 300) {
-                    val rec = audioRecord ?: break
-                    val n = rec.read(readBuf, 0, readBuf.size)
-                    if (n > 0) out.write(readBuf, 0, n)
+                val rec = audioRecord ?: break
+                val n = rec.read(frame, 0, frame.size)
+                if (n <= 0) {
+                    Thread.sleep(10)
+                    continue
                 }
-                if (out.size() > 0) {
-                    // Fire off the network request on its own coroutine so capture of the
-                    // NEXT chunk starts immediately instead of waiting for the HTTP round
-                    // trip to finish. This removes the growing delay/lag.
-                    val data = out.toByteArray()
+                val phrase = detector.feed(frame, n)
+                if (phrase != null) {
+                    // Each phrase is sent on its own coroutine so capture of the next
+                    // phrase continues while this one is being translated.
                     val seq = ++chunkSeq
                     CoroutineScope(Dispatchers.IO).launch {
-                        sendChunk(data, speaking, translate, seq)
+                        sendChunk(phrase, speaking, translate, seq)
                     }
+                }
+                // People stopped talking: clear the caption after a few seconds
+                // instead of leaving the last words frozen on screen.
+                if (captionShown && detector.msSinceSpeech >= CLEAR_AFTER_MS &&
+                    System.currentTimeMillis() - lastShownAt >= CLEAR_AFTER_MS) {
+                    captionShown = false
+                    OverlayService.updateText(applicationContext, "")
                 }
             }
         }
@@ -122,8 +129,16 @@ class CaptionService : Service() {
 
     private var chunkSeq = 0L
     @Volatile private var lastAppliedSeq = 0L
-    @Volatile private var silentChunkCount = 0
-    private val SILENT_CHUNKS_BEFORE_CLEAR = 3
+    @Volatile private var captionShown = false
+    @Volatile private var lastShownAt = 0L
+    // Last phrases heard, sent as context so the translation follows the conversation.
+    private val recentOriginals = ArrayDeque<String>()
+
+    private fun showCaption(text: String) {
+        lastShownAt = System.currentTimeMillis()
+        captionShown = true
+        OverlayService.updateText(applicationContext, text)
+    }
 
     private fun sendChunk(pcm: ByteArray, speaking: String, translate: String, seq: Long) {
         try {
@@ -136,6 +151,7 @@ class CaptionService : Service() {
                 put("sourceLang", speaking)
                 put("targetLang", translate)
                 put("guestId", guestId)
+                put("context", JSONArray(synchronized(recentOriginals) { recentOriginals.toList() }))
             }
 
             val request = Request.Builder()
@@ -154,33 +170,25 @@ class CaptionService : Service() {
                 }
                 if (!resp.isSuccessful) {
                     val err = body.optString("error", "HTTP ${resp.code}")
-                    OverlayService.updateText(applicationContext, "⚠ $err")
+                    showCaption("⚠ $err")
                     return
+                }
+                val original = body.optString("original", "")
+                if (original.isNotBlank()) synchronized(recentOriginals) {
+                    recentOriginals.addLast(original)
+                    while (recentOriginals.size > 2) recentOriginals.removeFirst()
                 }
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> {
-                        silentChunkCount = 0
-                        OverlayService.updateText(applicationContext, translated)
-                    }
-                    serverError.isNotBlank() -> {
-                        silentChunkCount = 0
-                        OverlayService.updateText(applicationContext, "⚠ $serverError")
-                    }
-                    else -> {
-                        // No speech in this chunk (silence). Keep showing the last caption
-                        // briefly, but clear it after a few consecutive silent chunks so it
-                        // doesn't stay frozen on screen once talking has stopped.
-                        val count = ++silentChunkCount
-                        if (count >= SILENT_CHUNKS_BEFORE_CLEAR) {
-                            OverlayService.updateText(applicationContext, "")
-                        }
-                    }
+                    translated.isNotBlank() -> showCaption(translated)
+                    serverError.isNotBlank() -> showCaption("⚠ $serverError")
+                    // No words recognised in this phrase: leave the screen as it is
+                    // (the capture loop clears it after a few seconds of silence).
                 }
             }
         } catch (e: Exception) {
-            OverlayService.updateText(applicationContext, "⚠ ${e.message ?: e.toString()}")
+            showCaption("⚠ ${e.message ?: e.toString()}")
         }
     }
 
@@ -198,6 +206,7 @@ class CaptionService : Service() {
     companion object {
         var isRunning = false
         private const val NOTIF_ID = 42
+        private const val CLEAR_AFTER_MS = 4000
         private const val API_BASE = "https://omran-caption.vercel.app"
         private const val EXTRA_SPEAKING = "speaking"
         private const val EXTRA_TRANSLATE = "translate"
