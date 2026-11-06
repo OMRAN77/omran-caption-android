@@ -43,27 +43,40 @@ class MainActivity : AppCompatActivity() {
         "हिन्दी" to "hi", "اردو" to "ur", "Bahasa Indonesia" to "id"
     )
 
+    // لغة التحدث: "تلقائي" يكتشف لغة الكلام (فيديو صيني، تركي، ...). بدونها كان
+    // اختيار العربية يجبر Whisper على العربية فيخرج كلامًا خاطئًا من الصوت الأجنبي.
+    private val speakingLanguages = listOf("تلقائي (أي لغة)" to "auto") + languages
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val speakNames = speakingLanguages.map { it.first }
         val names = languages.map { it.first }
+        val speakAdapter = ArrayAdapter(this, R.layout.spinner_item, speakNames)
+        speakAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         val adapter = ArrayAdapter(this, R.layout.spinner_item, names)
         adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
-        binding.spinnerSpeaking.adapter = adapter
+        binding.spinnerSpeaking.adapter = speakAdapter
         binding.spinnerTranslate.adapter = adapter
-        binding.spinnerSpeaking.setSelection(0) // Arabic default
-        binding.spinnerTranslate.setSelection(1) // English default
+        // Defaults: detect the spoken language, captions in Arabic; then remember the choice.
+        val savedSpeak = prefs.getString(KEY_SPEAK, "auto")
+        val savedTranslate = prefs.getString(KEY_TRANSLATE, "ar")
+        binding.spinnerSpeaking.setSelection(speakingLanguages.indexOfFirst { it.second == savedSpeak }.coerceAtLeast(0))
+        binding.spinnerTranslate.setSelection(languages.indexOfFirst { it.second == savedTranslate }.coerceAtLeast(0))
 
         binding.spinnerSpeaking.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                Toast.makeText(this@MainActivity, "لغة التحدث: ${names[position]}", Toast.LENGTH_SHORT).show()
+                prefs.edit().putString(KEY_SPEAK, speakingLanguages[position].second).apply()
+                Toast.makeText(this@MainActivity, "لغة التحدث: ${speakNames[position]}", Toast.LENGTH_SHORT).show()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
         binding.spinnerTranslate.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                prefs.edit().putString(KEY_TRANSLATE, languages[position].second).apply()
                 Toast.makeText(this@MainActivity, "لغة الترجمة: ${names[position]}", Toast.LENGTH_SHORT).show()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -135,7 +148,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCaptioningNow() {
-        val speakingCode = languages[binding.spinnerSpeaking.selectedItemPosition].second
+        val speakingCode = speakingLanguages[binding.spinnerSpeaking.selectedItemPosition].second
         val translateCode = languages[binding.spinnerTranslate.selectedItemPosition].second
         CaptionService.start(this, speakingCode, translateCode)
         OverlayService.show(this)
@@ -179,5 +192,8 @@ class MainActivity : AppCompatActivity() {
         private const val REQ_MIC = 1
         private const val REQ_NOTIF = 2
         private const val REQ_OVERLAY = 3
+        private const val PREFS = "omran_caption_prefs"
+        private const val KEY_SPEAK = "speak_lang"
+        private const val KEY_TRANSLATE = "translate_lang"
     }
 }
