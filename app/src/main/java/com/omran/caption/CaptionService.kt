@@ -33,6 +33,7 @@ class CaptionService : Service() {
     private var sequence = 0L
     private var applied = 0L
     private var silentSince = 0L
+    private val history = java.util.Collections.synchronizedList(mutableListOf<String>())
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() { stopSelf() }
     }
@@ -93,7 +94,7 @@ class CaptionService : Service() {
         try {
             while (currentCoroutineContext().isActive && isRunning) {
                 val chunk = ByteArrayOutputStream()
-                while (chunk.size() < 38400 && isRunning) {
+                while (chunk.size() < 128000 && isRunning) {
                     val count = audio.read(buffer, 0, buffer.size)
                     if (count < 0) error("Audio capture stopped")
                     if (count == 0) { delay(10); continue }
@@ -128,6 +129,7 @@ class CaptionService : Service() {
             val payload = JSONObject().put("audioBase64", Base64.encodeToString(PcmToWav.wrap(pcm, sampleRate), Base64.NO_WRAP))
                 .put("mimeType", "audio/wav").put("sourceLang", source)
                 .put("targetLang", target).put("twoWay", false)
+                .put("context", org.json.JSONArray(synchronized(history) { history.takeLast(2) }))
             val request = Request.Builder().url("https://omran-caption.vercel.app/api/caption")
                 .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
             client.newCall(request).execute().use { response ->
@@ -137,6 +139,11 @@ class CaptionService : Service() {
                     return
                 }
                 val text = CaptionText.format(body.optString("original"), body.optString("translated"), body.optString("translationError"))
+                val original = body.optString("original")
+                if (original.isNotBlank()) synchronized(history) {
+                    history.add(original)
+                    while (history.size > 2) history.removeAt(0)
+                }
                 if (text.isNotBlank()) show(seq, text)
             }
         } catch (_: Exception) {

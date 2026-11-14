@@ -70,6 +70,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateButtonState()
+        binding.btnVideo.setOnClickListener {
+            stopCaptioning()
+            startActivity(Intent(this, VideoPlayerActivity::class.java))
+        }
 
         binding.btnStart.setOnClickListener {
             if (CaptionService.isRunning) {

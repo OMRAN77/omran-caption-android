@@ -21,6 +21,6 @@ jobs:
       - run: gradle testDebugUnitTest assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: omran-caption-video-2.1.0
+          name: omran-caption-video-2.2.0
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
