@@ -39,8 +39,9 @@ object OverlayService {
             @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
         val density = ctx.resources.displayMetrics.density
-        val defaultWidth = (300 * density).toInt()
-        val defaultHeight = (110 * density).toInt()
+        val metrics = ctx.resources.displayMetrics
+        val defaultWidth = minOf((300 * density).toInt(), metrics.widthPixels)
+        val defaultHeight = minOf((220 * density).toInt(), metrics.heightPixels)
 
         val lp = WindowManager.LayoutParams(
             defaultWidth,
@@ -52,8 +53,8 @@ object OverlayService {
         )
         val prefs = ctx.getSharedPreferences("overlay_pos", Context.MODE_PRIVATE)
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = prefs.getInt("x", 0)
-        lp.y = prefs.getInt("y", 200)
+        lp.x = prefs.getInt("x", 0).coerceIn(0, (metrics.widthPixels - defaultWidth).coerceAtLeast(0))
+        lp.y = prefs.getInt("y", 200).coerceIn(0, (metrics.heightPixels - defaultHeight).coerceAtLeast(0))
         params = lp
 
         // Drag the text itself to move the overlay.

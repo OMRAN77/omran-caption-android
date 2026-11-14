@@ -57,6 +57,11 @@
         android:layout_marginBottom="32dp" />
 
     <Button
+        android:id="@+id/btnVideo"
+        android:layout_width="260dp"
+        android:layout_height="56dp"
+        android:text="فيديو مع ترجمة متزامنة" />
+    <Button
         android:id="@+id/btnStart"
         android:layout_width="260dp"
         android:layout_height="56dp"
