@@ -94,7 +94,7 @@ class CaptionService : Service() {
             while (currentCoroutineContext().isActive && isRunning) {
                 val chunk = ByteArrayOutputStream()
                 while (chunk.size() < 38400 && isRunning) {
-                    val count = audio.read(buffer, 0, buffer.size())
+                    val count = audio.read(buffer, 0, buffer.size)
                     if (count < 0) error("Audio capture stopped")
                     if (count == 0) { delay(10); continue }
                     chunk.write(buffer, 0, count)
