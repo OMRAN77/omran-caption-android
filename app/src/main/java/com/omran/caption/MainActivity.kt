@@ -1,6 +1,8 @@
 package com.omran.caption
 
 import android.content.Intent
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,7 +29,7 @@ class MainActivity : AppCompatActivity() {
 
     // لغة التحدث تكون محددة (مثل النسخة الأولى): التعرف التلقائي على مقاطع
     // ثانية واحدة يغلط في اللغة. الاختيار ينحفظ؛ الافتراضي صيني -> عربي.
-    private val speakingLanguages = languages
+    private val speakingLanguages = listOf("تلقائي / Auto" to "auto") + languages
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +48,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerTranslate.adapter = adapter
         // Defaults: detect the spoken language, captions in Arabic; then remember the choice.
         // A value the list no longer has (the old "auto") falls back to Chinese.
-        val savedSpeak = prefs.getString(KEY_SPEAK, "zh")
+        val savedSpeak = prefs.getString(KEY_SPEAK, "auto")
         val savedTranslate = prefs.getString(KEY_TRANSLATE, "ar")
         val speakIndex = speakingLanguages.indexOfFirst { it.second == savedSpeak }
         binding.spinnerSpeaking.setSelection(if (speakIndex >= 0) speakIndex else speakingLanguages.indexOfFirst { it.second == "zh" })
@@ -78,6 +80,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) updateButtonState()
+    }
+
     private fun updateButtonState() {
         binding.btnStart.text = if (CaptionService.isRunning)
             getString(R.string.stop_caption) else getString(R.string.start_caption)
@@ -102,15 +109,16 @@ class MainActivity : AppCompatActivity() {
             startActivityForResult(intent, REQ_OVERLAY)
             return
         }
-        // 4) Start capturing via microphone (works with YouTube & all apps)
-        startCaptioningNow()
+        // A fresh system consent is required for each playback-capture session.
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(manager.createScreenCaptureIntent(), REQ_CAPTURE)
     }
 
-    private fun startCaptioningNow() {
+    private fun startCaptioningNow(resultCode: Int, data: Intent) {
         val speakingCode = speakingLanguages[binding.spinnerSpeaking.selectedItemPosition].second
         val translateCode = languages[binding.spinnerTranslate.selectedItemPosition].second
-        CaptionService.start(this, speakingCode, translateCode)
         OverlayService.show(this)
+        CaptionService.start(this, speakingCode, translateCode, resultCode, data)
         CaptionService.isRunning = true
         updateButtonState()
     }
@@ -128,6 +136,13 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQ_OVERLAY -> requestPermissionsAndStart()
+            REQ_CAPTURE -> {
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    startCaptioningNow(resultCode, data)
+                } else {
+                    Toast.makeText(this, "يلزم السماح بالتقاط صوت الفيديو", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
@@ -142,6 +157,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQ_MIC = 1
         private const val REQ_NOTIF = 2
         private const val REQ_OVERLAY = 3
+        private const val REQ_CAPTURE = 4
         private const val PREFS = "omran_caption_prefs"
         private const val KEY_SPEAK = "speak_lang"
         private const val KEY_TRANSLATE = "translate_lang"

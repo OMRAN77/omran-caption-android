@@ -11,8 +11,8 @@ android {
         applicationId 'com.omran.caption'
         minSdk 29
         targetSdk 34
-        versionCode 7
-        versionName '2.0.0'
+        versionCode 9
+        versionName '2.1.0'
     }
 
     signingConfigs {
@@ -58,6 +58,7 @@ android {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
