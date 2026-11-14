@@ -72,7 +72,23 @@ class VideoCaptions(private val context: Context) {
                                 ?: (endMs - startMs) / 1000.0
                             val begin = (startMs + (from * 1000).toLong()).coerceIn(startMs, endMs)
                             val finish = (startMs + (to * 1000).toLong()).coerceIn(begin, endMs)
-                            if (finish > begin) cues.add(VideoCue(begin, finish, original, translated))
+                            val segmentText = kept.map { it.optString("cleaned", it.optString("text")).trim() }
+                            // Debug text is capped at 80 characters by the existing server.
+                            // Use it only when it reproduces the complete transcript exactly.
+                            if (kept.size > 1 && segmentText.all { it.length < 80 } &&
+                                segmentText.joinToString(" ").replace(Regex("\\s+"), " ") ==
+                                original.replace(Regex("\\s+"), " ")) {
+                                kept.forEachIndexed { i, segment ->
+                                    check(!cancelled) { "أُلغيت المعالجة" }
+                                    val segmentStart = (startMs + (segment.optDouble("start") * 1000).toLong()).coerceIn(startMs, endMs)
+                                    val segmentEnd = (startMs + (segment.optDouble("end") * 1000).toLong()).coerceIn(segmentStart, endMs)
+                                    if (segmentEnd > segmentStart) {
+                                        val text = segmentText[i]
+                                        val translation = translate(text, body.optString("detectedLang", source), target, original)
+                                        cues.add(VideoCue(segmentStart, segmentEnd, text, translation))
+                                    }
+                                }
+                            } else if (finish > begin) cues.add(VideoCue(begin, finish, original, translated))
                             history.add(original)
                         }
                     }
@@ -136,6 +152,20 @@ class VideoCaptions(private val context: Context) {
             try { decoder?.stop() } catch (_: Exception) {}
             decoder?.release()
             extractor.release()
+        }
+    }
+
+    private fun translate(text: String, source: String, target: String, context: String): String {
+        if (source == target) return text
+        val payload = JSONObject().put("text", text).put("sourceLang", source)
+            .put("targetLang", target).put("twoWay", false).put("context", JSONArray(listOf(context)))
+        val request = Request.Builder().url("https://omran-caption.vercel.app/api/translate")
+            .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+        return client.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "تعذرت ترجمة الجملة (${response.code})؛ أعد المحاولة" }
+            val body = JSONObject(response.body?.string() ?: "{}")
+            check(body.optString("translationError").isBlank() && body.optString("error").isBlank()) { "تعذرت ترجمة الجملة" }
+            body.optString("translated").also { check(it.isNotBlank()) { "وصلت ترجمة فارغة" } }
         }
     }
 }
