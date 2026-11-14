@@ -57,6 +57,13 @@
         android:layout_marginBottom="32dp" />
 
     <Button
+        android:id="@+id/btnAccess"
+        android:layout_width="260dp"
+        android:layout_height="wrap_content"
+        android:text="رمز الوصول / Access token"
+        android:layout_marginBottom="12dp" />
+
+    <Button
         android:id="@+id/btnStart"
         android:layout_width="260dp"
         android:layout_height="56dp"

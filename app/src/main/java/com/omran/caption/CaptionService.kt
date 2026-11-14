@@ -15,6 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import java.util.concurrent.Semaphore
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,15 +33,25 @@ class CaptionService : Service() {
 
     private var audioRecord: AudioRecord? = null
     private var job: Job? = null
+    private val networkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val requestSlots = Semaphore(2)
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(25, TimeUnit.SECONDS)
         .build()
 
     private val sampleRate = 16000
     private lateinit var guestId: String
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIF_ID, buildNotification())
+        if (PrivateAccess.get().isEmpty()) {
+            isRunning = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (job?.isActive == true) return START_NOT_STICKY
         val speaking = intent?.getStringExtra(EXTRA_SPEAKING) ?: "ar"
         val translate = intent?.getStringExtra(EXTRA_TRANSLATE) ?: "en"
 
@@ -47,9 +60,9 @@ class CaptionService : Service() {
             prefs.edit().putString("guest_id", it).apply()
         }
 
-        startForeground(NOTIF_ID, buildNotification())
+        isRunning = true
         startCapture(speaking, translate)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun buildNotification(): Notification {
@@ -104,14 +117,18 @@ class CaptionService : Service() {
                     val n = rec.read(readBuf, 0, readBuf.size)
                     if (n > 0) out.write(readBuf, 0, n)
                 }
-                if (out.size() > 0) {
+                if (out.size() > 0 && requestSlots.tryAcquire()) {
                     // Fire off the network request on its own coroutine so capture of the
                     // NEXT chunk starts immediately instead of waiting for the HTTP round
                     // trip to finish. This removes the growing delay/lag.
                     val data = out.toByteArray()
                     val seq = ++chunkSeq
-                    CoroutineScope(Dispatchers.IO).launch {
-                        sendChunk(data, speaking, translate, seq)
+                    networkScope.launch {
+                        try {
+                            if (isRunning) sendChunk(data, speaking, translate, seq)
+                        } finally {
+                            requestSlots.release()
+                        }
                     }
                 }
             }
@@ -140,10 +157,21 @@ class CaptionService : Service() {
 
             val request = Request.Builder()
                 .url("$API_BASE/api/caption")
+                .header("Authorization", "Bearer ${PrivateAccess.get()}")
                 .post(json.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { resp ->
+                if (!isRunning) return
+                if (resp.code == 401 || resp.code == 503) {
+                    if (resp.code == 401) PrivateAccess.clear()
+                    OverlayService.updateText(applicationContext,
+                        if (resp.code == 401) "⚠ افتح التطبيق وأدخل رمز الوصول الصحيح"
+                        else "⚠ حماية الخادم غير مهيأة، راجع إعداد رمز الوصول")
+                    isRunning = false
+                    stopSelf()
+                    return
+                }
                 val text = resp.body?.string() ?: return
                 val body = JSONObject(text)
                 // Chunks run in parallel, so responses can arrive out of order.
@@ -160,13 +188,13 @@ class CaptionService : Service() {
                 val serverError = body.optString("translationError", "")
                 val translated = body.optString("translated", "")
                 when {
-                    translated.isNotBlank() -> {
-                        silentChunkCount = 0
-                        OverlayService.updateText(applicationContext, translated)
-                    }
                     serverError.isNotBlank() -> {
                         silentChunkCount = 0
                         OverlayService.updateText(applicationContext, "⚠ $serverError")
+                    }
+                    translated.isNotBlank() -> {
+                        silentChunkCount = 0
+                        OverlayService.updateText(applicationContext, translated)
                     }
                     else -> {
                         // No speech in this chunk (silence). Keep showing the last caption
@@ -180,14 +208,17 @@ class CaptionService : Service() {
                 }
             }
         } catch (e: Exception) {
-            OverlayService.updateText(applicationContext, "⚠ ${e.message ?: e.toString()}")
+            if (isRunning) OverlayService.updateText(applicationContext, "⚠ تعذر الاتصال بخدمة الترجمة")
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
         job?.cancel()
-        audioRecord?.stop()
+        networkScope.cancel()
+        client.dispatcher.cancelAll()
+        try { audioRecord?.stop() } catch (_: IllegalStateException) {}
         audioRecord?.release()
         audioRecord = null
         isRunning = false
@@ -196,7 +227,7 @@ class CaptionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        var isRunning = false
+        @Volatile var isRunning = false
         private const val NOTIF_ID = 42
         private const val API_BASE = "https://omran-caption.vercel.app"
         private const val EXTRA_SPEAKING = "speaking"

@@ -7,6 +7,10 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import android.widget.EditText
+import android.text.InputType
+import android.view.WindowManager
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import android.Manifest
@@ -76,6 +80,11 @@ class MainActivity : AppCompatActivity() {
                 requestPermissionsAndStart()
             }
         }
+        binding.btnAccess.setOnClickListener {
+            if (CaptionService.isRunning) stopCaptioning()
+            PrivateAccess.clear()
+            requestAccessToken(false)
+        }
     }
 
     private fun updateButtonState() {
@@ -84,6 +93,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPermissionsAndStart() {
+        if (PrivateAccess.get().isEmpty()) {
+            requestAccessToken(true)
+            return
+        }
         // 1) Mic permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
@@ -104,6 +117,40 @@ class MainActivity : AppCompatActivity() {
         }
         // 4) Start capturing via microphone (works with YouTube & all apps)
         startCaptioningNow()
+    }
+
+    private fun requestAccessToken(startAfter: Boolean) {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSaveEnabled = false
+            importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            hint = "رمز الوصول الشخصي"
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("الوصول الخاص / Private access")
+            .setMessage("أدخل رمز الوصول المُعدّ على الخادم. يبقى في الذاكرة فقط.")
+            .setView(input)
+            .setPositiveButton("دخول / Unlock", null)
+            .setNegativeButton("إلغاء / Cancel", null)
+            .create()
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.setOnDismissListener { input.text.clear() }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (!PrivateAccess.set(input.text.toString())) {
+                    input.error = "يلزم رمز من 32 إلى 256 حرفًا لاتينيًا قابلًا للطباعة دون مسافات"
+                } else {
+                    dialog.dismiss()
+                    if (startAfter) requestPermissionsAndStart()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) updateButtonState()
     }
 
     private fun startCaptioningNow() {
